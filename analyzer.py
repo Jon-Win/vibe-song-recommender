@@ -1,3 +1,8 @@
+"""Image analysis module using OpenCLIP for mood, scene, and color detection."""
+
+from typing import Any
+
+import numpy as np
 import open_clip
 import torch
 from PIL import Image
@@ -5,7 +10,7 @@ from PIL import Image
 MODEL_NAME = "ViT-B-32"
 PRETRAINED = "laion2b_s34b_b79k"
 
-MOOD_LABELS = [
+MOOD_LABELS: list[str] = [
     "happy and energetic",
     "sad and melancholic",
     "calm and peaceful",
@@ -20,7 +25,7 @@ MOOD_LABELS = [
     "powerful and triumphant",
 ]
 
-SCENE_LABELS = [
+SCENE_LABELS: list[str] = [
     "beach sunset",
     "city skyline at night",
     "forest or nature",
@@ -35,7 +40,7 @@ SCENE_LABELS = [
     "snowy winter",
 ]
 
-COLOR_LABELS = [
+COLOR_LABELS: list[str] = [
     "warm golden tones",
     "cool blue tones",
     "vibrant saturated colors",
@@ -48,15 +53,31 @@ COLOR_LABELS = [
 
 
 class ImageAnalyzer:
-    def __init__(self):
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+    """Analyzes images using CLIP to detect mood, scene, and color characteristics.
+
+    Uses zero-shot classification by comparing image embeddings against
+    predefined text label embeddings to determine the dominant attributes.
+    """
+
+    def __init__(self) -> None:
+        """Initialize the CLIP model and preprocessing pipeline."""
+        self.device: str = "cuda" if torch.cuda.is_available() else "cpu"
         self.model, _, self.preprocess = open_clip.create_model_and_transforms(
             MODEL_NAME, pretrained=PRETRAINED
         )
         self.model = self.model.to(self.device)
         self.tokenizer = open_clip.get_tokenizer(MODEL_NAME)
 
-    def _get_similarities(self, image, text_labels):
+    def _get_similarities(self, image: Image.Image, text_labels: list[str]) -> np.ndarray:
+        """Compute cosine similarities between an image and a set of text labels.
+
+        Args:
+            image: A PIL Image in RGB mode.
+            text_labels: Descriptive text labels to compare against the image.
+
+        Returns:
+            A NumPy array of similarity scores, one per label.
+        """
         image_input = self.preprocess(image).unsqueeze(0).to(self.device)
         text_tokens = self.tokenizer(text_labels).to(self.device)
 
@@ -71,7 +92,16 @@ class ImageAnalyzer:
 
         return similarities.cpu().numpy()
 
-    def analyze(self, image_path):
+    def analyze(self, image_path: str) -> dict[str, list[dict[str, Any]]]:
+        """Analyze an image and return its top mood, scene, and color attributes.
+
+        Args:
+            image_path: Path to the image file on disk.
+
+        Returns:
+            A dictionary with keys 'moods', 'scenes', and 'colors', each
+            containing a ranked list of labels with their similarity scores.
+        """
         image = Image.open(image_path).convert("RGB")
 
         mood_scores = self._get_similarities(image, MOOD_LABELS)
