@@ -1,6 +1,9 @@
 flask
 Pillow
+torch
+torchvision
+transformers
+open-clip-torch
 spotipy
 python-dotenv
 numpy
-gunicorn
