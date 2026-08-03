@@ -1,9 +1,10 @@
-import open_clip
-import torch
+import os
+import base64
+import requests
 from PIL import Image
+from io import BytesIO
 
-MODEL_NAME = "ViT-B-32"
-PRETRAINED = "laion2b_s34b_b79k"
+HF_API_URL = "https://api-inference.huggingface.co/models/openai/clip-vit-base-patch32"
 
 MOOD_LABELS = [
     "happy and energetic",
@@ -49,47 +50,71 @@ COLOR_LABELS = [
 
 class ImageAnalyzer:
     def __init__(self):
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.model, _, self.preprocess = open_clip.create_model_and_transforms(
-            MODEL_NAME, pretrained=PRETRAINED
+        self.api_token = os.getenv("HF_API_TOKEN", "")
+        self.headers = {}
+        if self.api_token:
+            self.headers["Authorization"] = f"Bearer {self.api_token}"
+
+    def _classify(self, image_bytes, candidate_labels):
+        response = requests.post(
+            HF_API_URL,
+            headers=self.headers,
+            json={
+                "inputs": {
+                    "image": base64.b64encode(image_bytes).decode("utf-8"),
+                },
+                "parameters": {
+                    "candidate_labels": candidate_labels,
+                },
+            },
+            timeout=30,
         )
-        self.model = self.model.to(self.device)
-        self.tokenizer = open_clip.get_tokenizer(MODEL_NAME)
 
-    def _get_similarities(self, image, text_labels):
-        image_input = self.preprocess(image).unsqueeze(0).to(self.device)
-        text_tokens = self.tokenizer(text_labels).to(self.device)
+        if response.status_code == 503:
+            # Model is loading, retry once
+            import time
+            time.sleep(5)
+            response = requests.post(
+                HF_API_URL,
+                headers=self.headers,
+                json={
+                    "inputs": {
+                        "image": base64.b64encode(image_bytes).decode("utf-8"),
+                    },
+                    "parameters": {
+                        "candidate_labels": candidate_labels,
+                    },
+                },
+                timeout=60,
+            )
 
-        with torch.no_grad():
-            image_features = self.model.encode_image(image_input)
-            text_features = self.model.encode_text(text_tokens)
+        response.raise_for_status()
+        results = response.json()
 
-            image_features /= image_features.norm(dim=-1, keepdim=True)
-            text_features /= text_features.norm(dim=-1, keepdim=True)
+        scores = {}
+        for item in results:
+            scores[item["label"]] = item["score"]
 
-            similarities = (image_features @ text_features.T).squeeze(0)
-
-        return similarities.cpu().numpy()
+        return scores
 
     def analyze(self, image_path):
-        image = Image.open(image_path).convert("RGB")
+        img = Image.open(image_path).convert("RGB")
+        img.thumbnail((512, 512))
 
-        mood_scores = self._get_similarities(image, MOOD_LABELS)
-        scene_scores = self._get_similarities(image, SCENE_LABELS)
-        color_scores = self._get_similarities(image, COLOR_LABELS)
+        buffer = BytesIO()
+        img.save(buffer, format="JPEG", quality=85)
+        image_bytes = buffer.getvalue()
 
-        top_moods = sorted(
-            zip(MOOD_LABELS, mood_scores), key=lambda x: x[1], reverse=True
-        )[:3]
-        top_scenes = sorted(
-            zip(SCENE_LABELS, scene_scores), key=lambda x: x[1], reverse=True
-        )[:2]
-        top_colors = sorted(
-            zip(COLOR_LABELS, color_scores), key=lambda x: x[1], reverse=True
-        )[:2]
+        mood_scores = self._classify(image_bytes, MOOD_LABELS)
+        scene_scores = self._classify(image_bytes, SCENE_LABELS)
+        color_scores = self._classify(image_bytes, COLOR_LABELS)
+
+        top_moods = sorted(mood_scores.items(), key=lambda x: x[1], reverse=True)[:3]
+        top_scenes = sorted(scene_scores.items(), key=lambda x: x[1], reverse=True)[:2]
+        top_colors = sorted(color_scores.items(), key=lambda x: x[1], reverse=True)[:2]
 
         return {
-            "moods": [{"label": label, "score": float(score)} for label, score in top_moods],
-            "scenes": [{"label": label, "score": float(score)} for label, score in top_scenes],
-            "colors": [{"label": label, "score": float(score)} for label, score in top_colors],
+            "moods": [{"label": label, "score": score} for label, score in top_moods],
+            "scenes": [{"label": label, "score": score} for label, score in top_scenes],
+            "colors": [{"label": label, "score": score} for label, score in top_colors],
         }

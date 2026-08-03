@@ -13,9 +13,9 @@ app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024  # 16MB max
 
 os.makedirs(app.config["UPLOAD_FOLDER"], exist_ok=True)
 
-print("Loading CLIP model (first run downloads ~400MB)...")
+print("Initializing image analyzer (using Hugging Face CLIP API)...")
 analyzer = ImageAnalyzer()
-print("Model loaded!")
+print("Ready!")
 
 recommender = SongRecommender(
     client_id=os.getenv("SPOTIFY_CLIENT_ID"),
