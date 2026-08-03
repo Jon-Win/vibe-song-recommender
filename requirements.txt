@@ -1,6 +1,5 @@
 flask
 Pillow
-requests
 spotipy
 python-dotenv
 numpy
